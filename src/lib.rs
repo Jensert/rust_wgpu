@@ -30,19 +30,28 @@ impl ApplicationHandler for App {
         let window = self.state.as_ref().unwrap().window();
 
         if window.id() == window_id {
-            match event {
-                WindowEvent::CloseRequested => {
-                    println!("Closing window");
-                    event_loop.exit();
-                },
-                WindowEvent::Resized(size) => {
-                    println!("Resizing window");
-                    self.state.as_mut().unwrap().resize(size);
-                },
-                WindowEvent::RedrawRequested => {
-                    self.state.as_mut().unwrap().render().unwrap();
-                },
-                _ => (),
+            if !self.state.as_mut().unwrap().input(&event) {
+                match event {
+                    WindowEvent::CloseRequested => {
+                        println!("Closing window");
+                        event_loop.exit();
+                    },
+                    WindowEvent::Resized(size) => {
+                        println!("Resizing window");
+                        self.state.as_mut().unwrap().resize(size);
+                    },
+                    WindowEvent::RedrawRequested => {
+                        self.state.as_mut().unwrap().window().request_redraw();
+
+                        self.state.as_mut().unwrap().update();
+
+                        match self.state.as_mut().unwrap().render() {
+                            Ok(_) => {},
+                            Err(E) => {println!("Rendering failed: {:?}", E);},
+                        }
+                    },
+                    _ => (),
+                }
             }
         }
     }
@@ -55,6 +64,7 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     window: Arc<Window>,
+    clear_color: wgpu::Color,
 }
 
 impl State {
@@ -71,7 +81,14 @@ impl State {
 
         surface.configure(&device, &config);
 
-        Self{surface, device, queue, config, size, window: window_arc}
+        let clear_color = wgpu::Color {
+            r: 0.1,
+            g: 0.2,
+            b: 0.3,
+            a: 1.0,
+        };
+
+        Self{surface, device, queue, config, size, window: window_arc, clear_color}
 
     }
 
@@ -139,13 +156,22 @@ impl State {
         self.surface.configure(&self.device, &self.config);
     }
 
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
-        false
+    fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                self.clear_color = wgpu::Color {
+                    r: position.x as f64 / self.size.width as f64,
+                    g: position.y as f64 / self.size.height as f64,
+                    b: 1.0,
+                    a: 1.0,
+                };
+                true
+            }
+            _ => false,
+        }
     }
 
-    pub fn update(&mut self) {
-        todo!()
-    }
+    pub fn update(&mut self) {}
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
@@ -167,12 +193,7 @@ impl State {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
