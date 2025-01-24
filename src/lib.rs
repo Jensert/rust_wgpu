@@ -3,10 +3,10 @@ use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowAttributes, WindowId},
+    window::{Window, WindowId},
 };
 use winit::dpi::PhysicalSize;
-use pollster::{block_on, FutureExt};
+use pollster::FutureExt;
 use winit::event::ElementState;
 use winit::keyboard::KeyCode;
 
@@ -57,6 +57,18 @@ impl ApplicationHandler for App {
         }
     }
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [ 0.0,  1.0, 0.0], color: [ 1.0, 0.0, 0.0] },
+    Vertex { position: [-1.0, -1.0, 0.0], color: [ 0.0, 1.0, 0.0] },
+    Vertex { position: [ 0.0, -1.0, 0.0], color: [ 0.0, 0.0, 1.0] },
+];
 
 struct State {
     surface: wgpu::Surface<'static>,
@@ -126,7 +138,6 @@ impl State {
             ..Default::default()
         })
     }
-
 
     fn create_adapter(instance: wgpu::Instance, surface: &wgpu::Surface) -> wgpu::Adapter {
         instance.request_adapter(
