@@ -7,12 +7,13 @@ use winit::{
 };
 use winit::dpi::PhysicalSize;
 use pollster::{block_on, FutureExt};
+use winit::event::ElementState;
+use winit::keyboard::KeyCode;
 
 #[derive(Default)]
 struct App {
     state: Option<State>,
 }
-
 impl App {
     pub fn new() -> Self {
         Self {state: None}
@@ -64,7 +65,12 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     window: Arc<Window>,
+    render_pipeline: wgpu::RenderPipeline,
+    // challenge 1
     clear_color: wgpu::Color,
+    // challenge 2
+    render_pipeline_challenge: wgpu::RenderPipeline,
+    use_challenge_shader: bool,
 }
 
 impl State {
@@ -79,16 +85,38 @@ impl State {
         let surface_caps = surface.get_capabilities(&adapter);
         let config = Self::create_surface_config(surface_caps, size);
 
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Shader Module"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        });
+        let challenge_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Shader Module"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_color.wgsl").into()),
+        });
+        let render_pipeline = Self::create_render_pipeline(&device, &config, &shader_module);
+        let render_pipeline_challenge = Self::create_render_pipeline(&device, &config, &challenge_shader_module);
+
         surface.configure(&device, &config);
 
         let clear_color = wgpu::Color {
-            r: 0.1,
-            g: 0.2,
-            b: 0.3,
+            r: 0.3,
+            g: 0.3,
+            b: 0.2,
             a: 1.0,
         };
 
-        Self{surface, device, queue, config, size, window: window_arc, clear_color}
+        Self {
+            surface,
+            device,
+            queue,
+            config,
+            size,
+            window: window_arc,
+            render_pipeline,
+            clear_color,
+            render_pipeline_challenge,
+            use_challenge_shader: false,
+        }
 
     }
 
@@ -145,6 +173,61 @@ impl State {
         }
     }
 
+    fn create_render_pipeline(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        shader_module: &wgpu::ShaderModule
+    ) -> wgpu::RenderPipeline {
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+
+        // Render pipeline object to be returned
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader_module,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                // Other modes besides Fill requires Features::NON_FILL_POLYGON_MODE
+                polygon_mode: wgpu::PolygonMode::Fill,
+                // Requires Features::DEPTH_CLIP_CONTROL
+                unclipped_depth: false,
+                // requires Features::CONSERVATIVE_RASTERIZATION
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        })
+    }
+
     pub fn window(&self) -> &Window {
         &self.window
     }
@@ -164,6 +247,13 @@ impl State {
                     g: position.y as f64 / self.size.height as f64,
                     b: 1.0,
                     a: 1.0,
+                };
+                true
+            }
+            WindowEvent::KeyboardInput { event, ..} => {
+                if event.physical_key == KeyCode::Space && event.state == ElementState::Pressed {
+                    println!("{}", self.use_challenge_shader);
+                    self.use_challenge_shader = !self.use_challenge_shader;
                 };
                 true
             }
@@ -187,7 +277,7 @@ impl State {
         });
 
         {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -201,6 +291,14 @@ impl State {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+
+            if self.use_challenge_shader {
+                render_pass.set_pipeline(&self.render_pipeline_challenge);
+            } else {
+                render_pass.set_pipeline(&self.render_pipeline);
+            }
+
+            render_pass.draw(0..3, 0..1);
         }
 
         // Submit will accept anything that implements IntoIter
