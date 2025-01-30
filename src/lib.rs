@@ -44,7 +44,7 @@ impl ApplicationHandler for App {
                             Err(E) => {println!("Rendering failed: {:?}", E);},
                         }
                     },
-                    
+
                     WindowEvent::KeyboardInput { event, ..} => {
                         match event.physical_key {
                             PhysicalKey::Code(KeyCode::Escape) => {
@@ -171,6 +171,30 @@ impl State {
         let render_pipeline = Self::create_render_pipeline(&device, &config, &shader_module);
 
         surface.configure(&device, &config);
+
+        let diffuse_bytes = include_bytes!("../assets/happy-tree.png");
+        let diffuse_image = image::load_from_memory(diffuse_bytes).expect("Could not load image");
+        let diffuse_rgba = diffuse_image.to_rgba8();
+
+        use image::GenericImageView;
+        let dimensions = diffuse_image.dimensions();
+
+        let texture_size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            // All textuers are stored as 3D. for 2d textures set depth to 1 
+            depth_or_array_layers: 1,
+        };
+        let diffuse_texture = device.create_texture( &wgpu::TextureDescriptor {
+            label: Some("diffuse_texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
 
         let clear_color = wgpu::Color {
             r: 0.3,
