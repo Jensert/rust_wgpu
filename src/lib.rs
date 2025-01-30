@@ -1,3 +1,5 @@
+mod texture;
+
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -25,42 +27,37 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
         let window = self.state.as_ref().unwrap().window();
 
-        if window.id() == window_id {
-            if !self.state.as_mut().unwrap().input(&event) {
-                match event {
+        if window.id() == window_id && !self.state.as_mut().unwrap().input(&event) {
+            match event {
 
-                    WindowEvent::Resized(size) => {
-                        println!("Resizing window");
-                        self.state.as_mut().unwrap().resize(size);
-                    },
+                WindowEvent::Resized(size) => {
+                    println!("Resizing window");
+                    self.state.as_mut().unwrap().resize(size);
+                },
 
-                    WindowEvent::RedrawRequested => {
-                        self.state.as_mut().unwrap().window().request_redraw();
-                        
-                        self.state.as_mut().unwrap().update();
-                        
-                        match self.state.as_mut().unwrap().render() {
-                            Ok(_) => {},
-                            Err(E) => {println!("Rendering failed: {:?}", E);},
-                        }
-                    },
+                WindowEvent::RedrawRequested => {
+                    self.state.as_mut().unwrap().window().request_redraw();
 
-                    WindowEvent::KeyboardInput { event, ..} => {
-                        match event.physical_key {
-                            PhysicalKey::Code(KeyCode::Escape) => {
-                                println!("Escape pressed!");
-                                event_loop.exit();
-                            }
-                            _ => {},
-                        }
-                    },
+                    self.state.as_mut().unwrap().update();
 
-                    WindowEvent::CloseRequested => {
-                        println!("Closing window");
+                    match self.state.as_mut().unwrap().render() {
+                        Ok(_) => {},
+                        Err(E) => {println!("Rendering failed: {:?}", E);},
+                    }
+                },
+
+                WindowEvent::KeyboardInput { event, ..} => {
+                    if let PhysicalKey::Code(KeyCode::Escape) = event.physical_key {
+                        println!("Escape pressed!");
                         event_loop.exit();
-                    },
-                    _ => (),
-                }
+                    }
+                },
+
+                WindowEvent::CloseRequested => {
+                    println!("Closing window");
+                    event_loop.exit();
+                },
+                _ => (),
             }
         }
     }
@@ -70,12 +67,12 @@ impl ApplicationHandler for App {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
+    tex_coords: [f32; 2],
 } 
 impl Vertex {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
                 wgpu::VertexAttribute {
@@ -84,9 +81,9 @@ impl Vertex {
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    offset: size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
             ],
         }
@@ -94,26 +91,11 @@ impl Vertex {
 }
 
 const VERTICES: &[Vertex] = &[
-    Vertex {
-        position: [-0.0868241, 0.49240386, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // A
-    Vertex {
-        position: [-0.49513406, 0.06958647, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // B
-    Vertex {
-        position: [-0.21918549, -0.44939706, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // C
-    Vertex {
-        position: [0.35966998, -0.3473291, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // D
-    Vertex {
-        position: [0.44147372, 0.2347359, 0.0],
-        color: [0.5, 0.0, 0.5],
-    }, // E
+    Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 1.-0.99240386], }, // A
+    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 1.-0.56958647], }, // B
+    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 1.-0.05060294], }, // C
+    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 1.-0.1526709], }, // D
+    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 1.-0.7347359], }, // E
 ];
 
 const INDICES: &[u16] = &[
@@ -133,6 +115,8 @@ struct State {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
+    diffuse_bind_group: wgpu::BindGroup,
+    diffuse_texture: texture::Texture,
     // challenge 1
     clear_color: wgpu::Color,
 }
@@ -166,35 +150,71 @@ impl State {
         
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader Module"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader_texture.wgsl").into()),
         });
-        let render_pipeline = Self::create_render_pipeline(&device, &config, &shader_module);
 
         surface.configure(&device, &config);
 
         let diffuse_bytes = include_bytes!("../assets/happy-tree.png");
-        let diffuse_image = image::load_from_memory(diffuse_bytes).expect("Could not load image");
-        let diffuse_rgba = diffuse_image.to_rgba8();
+        let diffuse_texture = texture::Texture::from_bytes(
+            &device,
+            &queue,
+            diffuse_bytes,
+            "happy-tree.png").unwrap();
 
-        use image::GenericImageView;
-        let dimensions = diffuse_image.dimensions();
+        let texture_bind_group_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {filterable: true},
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            }
+        );
 
-        let texture_size = wgpu::Extent3d {
-            width: dimensions.0,
-            height: dimensions.1,
-            // All textuers are stored as 3D. for 2d textures set depth to 1 
-            depth_or_array_layers: 1,
-        };
-        let diffuse_texture = device.create_texture( &wgpu::TextureDescriptor {
-            label: Some("diffuse_texture"),
-            size: texture_size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let diffuse_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                label: Some("Diffuse Bind Group"),
+                layout: &texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                    }
+                ],
+            },
+        );
+
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[&texture_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let render_pipeline = Self::create_render_pipeline(
+            &render_pipeline_layout,
+            &device,
+            &config,
+            &shader_module);
 
         let clear_color = wgpu::Color {
             r: 0.3,
@@ -214,6 +234,8 @@ impl State {
             vertex_buffer,
             index_buffer,
             num_indices,
+            diffuse_bind_group,
+            diffuse_texture,
             // Challenge 1
             clear_color,
         }
@@ -273,21 +295,15 @@ impl State {
     }
 
     fn create_render_pipeline(
+        layout: &wgpu::PipelineLayout,
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
         shader_module: &wgpu::ShaderModule
     ) -> wgpu::RenderPipeline {
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            });
-
         // Render pipeline object to be returned
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
+            layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: shader_module,
                 entry_point: Some("vs_main"),
@@ -342,8 +358,8 @@ impl State {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
                 self.clear_color = wgpu::Color {
-                    r: position.x as f64 / self.size.width as f64,
-                    g: position.y as f64 / self.size.height as f64,
+                    r: position.x / self.size.width as f64,
+                    g: position.y / self.size.height as f64,
                     b: 1.0,
                     a: 1.0,
                 };
@@ -386,6 +402,7 @@ impl State {
 
             
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
