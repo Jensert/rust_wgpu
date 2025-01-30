@@ -4,21 +4,15 @@ use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{PhysicalKey, KeyCode},
     window::{Window, WindowId},
 };
 use winit::dpi::PhysicalSize;
 use pollster::FutureExt;
-use winit::event::ElementState;
-use winit::keyboard::KeyCode;
 
 #[derive(Default)]
 struct App {
     state: Option<State>,
-}
-impl App {
-    pub fn new() -> Self {
-        Self {state: None}
-    }
 }
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -34,23 +28,36 @@ impl ApplicationHandler for App {
         if window.id() == window_id {
             if !self.state.as_mut().unwrap().input(&event) {
                 match event {
-                    WindowEvent::CloseRequested => {
-                        println!("Closing window");
-                        event_loop.exit();
-                    },
+
                     WindowEvent::Resized(size) => {
                         println!("Resizing window");
                         self.state.as_mut().unwrap().resize(size);
                     },
+
                     WindowEvent::RedrawRequested => {
                         self.state.as_mut().unwrap().window().request_redraw();
-
+                        
                         self.state.as_mut().unwrap().update();
-
+                        
                         match self.state.as_mut().unwrap().render() {
                             Ok(_) => {},
                             Err(E) => {println!("Rendering failed: {:?}", E);},
                         }
+                    },
+                    
+                    WindowEvent::KeyboardInput { event, ..} => {
+                        match event.physical_key {
+                            PhysicalKey::Code(KeyCode::Escape) => {
+                                println!("Escape pressed!");
+                                event_loop.exit();
+                            }
+                            _ => {},
+                        }
+                    },
+
+                    WindowEvent::CloseRequested => {
+                        println!("Closing window");
+                        event_loop.exit();
                     },
                     _ => (),
                 }
@@ -64,7 +71,8 @@ impl ApplicationHandler for App {
 struct Vertex {
     position: [f32; 3],
     color: [f32; 3],
-} impl Vertex {
+} 
+impl Vertex {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
@@ -79,23 +87,33 @@ struct Vertex {
                     offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x3,
-                }
-            ]
+                },
+            ],
         }
     }
 }
+
 const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [0.5, 0.0, 0.5] }, // A
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.5, 0.0, 0.5] }, // B
-    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.5, 0.0, 0.5] }, // E
-
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.5, 0.0, 0.5] }, // B
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.5, 0.0, 0.5] }, // C
-    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.5, 0.0, 0.5] }, // E
-
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.5, 0.0, 0.5] }, // C
-    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.5, 0.0, 0.5] }, // D
-    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.5, 0.0, 0.5] }, // E
+    Vertex {
+        position: [-0.0868241, 0.49240386, 0.0],
+        color: [0.5, 0.0, 0.5],
+    }, // A
+    Vertex {
+        position: [-0.49513406, 0.06958647, 0.0],
+        color: [0.5, 0.0, 0.5],
+    }, // B
+    Vertex {
+        position: [-0.21918549, -0.44939706, 0.0],
+        color: [0.5, 0.0, 0.5],
+    }, // C
+    Vertex {
+        position: [0.35966998, -0.3473291, 0.0],
+        color: [0.5, 0.0, 0.5],
+    }, // D
+    Vertex {
+        position: [0.44147372, 0.2347359, 0.0],
+        color: [0.5, 0.0, 0.5],
+    }, // E
 ];
 
 const INDICES: &[u16] = &[
@@ -103,7 +121,6 @@ const INDICES: &[u16] = &[
     1, 2, 4,
     2, 3, 4,
 ];
-
 
 struct State {
     surface: wgpu::Surface<'static>,
@@ -114,14 +131,10 @@ struct State {
     window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    num_vertices: u32,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
     // challenge 1
     clear_color: wgpu::Color,
-    // challenge 2
-    render_pipeline_challenge: wgpu::RenderPipeline,
-    use_challenge_shader: bool,
 }
 
 impl State {
@@ -136,7 +149,6 @@ impl State {
         let surface_caps = surface.get_capabilities(&adapter);
         let config = Self::create_surface_config(surface_caps, size);
         
-        let num_vertices = VERTICES.len() as u32;
         let vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
@@ -156,12 +168,7 @@ impl State {
             label: Some("Shader Module"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
-        let challenge_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader Module"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader_color.wgsl").into()),
-        });
         let render_pipeline = Self::create_render_pipeline(&device, &config, &shader_module);
-        let render_pipeline_challenge = Self::create_render_pipeline(&device, &config, &challenge_shader_module);
 
         surface.configure(&device, &config);
 
@@ -172,7 +179,6 @@ impl State {
             a: 1.0,
         };
 
-
         Self {
             surface,
             device,
@@ -182,14 +188,10 @@ impl State {
             window: window_arc,
             render_pipeline,
             vertex_buffer,
-            num_vertices,
             index_buffer,
             num_indices,
             // Challenge 1
             clear_color,
-            // Challenge 2
-            render_pipeline_challenge,
-            use_challenge_shader: false,
         }
 
     }
@@ -323,13 +325,6 @@ impl State {
                 };
                 true
             }
-            WindowEvent::KeyboardInput { event, ..} => {
-                if event.physical_key == KeyCode::Space && event.state == ElementState::Pressed {
-                    println!("{}", self.use_challenge_shader);
-                    self.use_challenge_shader = !self.use_challenge_shader;
-                };
-                true
-            }
             _ => false,
         }
     }
@@ -365,14 +360,10 @@ impl State {
                 timestamp_writes: None,
             });
 
-            if self.use_challenge_shader {
-                render_pass.set_pipeline(&self.render_pipeline_challenge);
-            } else {
-                render_pass.set_pipeline(&self.render_pipeline);
-            }
+            
+            render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
 
             //render_pass.draw(0..self.num_vertices, 0..1);
