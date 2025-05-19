@@ -379,7 +379,7 @@ impl State {
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
 
-        let aspect = (new_size.width / new_size.height) as f32;
+        let aspect = new_size.width as f32 / new_size.height as f32;
         self.camera.update_aspect(aspect);
     }
 

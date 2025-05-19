@@ -75,6 +75,7 @@ impl Camera {
 
         return proj * view;
     }
+
     pub fn process_events(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput {
