@@ -94,19 +94,30 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 );
 
 struct Camera {
-    eye: cgmath::Point3<f32>,
+    pos: cgmath::Point3<f32>,
     // target: cgmath::Point3<f32>,
     up: cgmath::Vector3<f32>,
     yaw: f32,
     pitch: f32,
     aspect: f32,
-    fovy: f32,
+    _fovy: f32,
     znear: f32,
     zfar: f32,
+
+    view_proj: [[f32; 4]; 4],
+
+    speed: f32,
+    sensitivity: f32,
+    is_forward_pressed: bool,
+    is_backward_pressed: bool,
+    is_left_pressed: bool,
+    is_right_pressed: bool,
+    is_up_pressed: bool,
+    is_down_pressed: bool,
 }
 impl Camera {
     fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        use cgmath::{InnerSpace, Matrix4, Point3, Rad, Vector3};
+        use cgmath::{InnerSpace, Matrix4, Rad, Vector3};
 
         let (yaw, pitch) = (Rad(self.yaw), Rad(self.pitch));
 
@@ -118,8 +129,8 @@ impl Camera {
         )
         .normalize();
 
-        let target = self.eye + direction;
-        let view = Matrix4::look_at_rh(self.eye, target, self.up);
+        let target = self.pos + direction;
+        let view = Matrix4::look_at_rh(self.pos, target, self.up);
 
         let proj = cgmath::perspective(
             Rad(std::f32::consts::FRAC_PI_4),
@@ -130,32 +141,6 @@ impl Camera {
 
         return OPENGL_TO_WGPU_MATRIX * proj * view;
     }
-}
-struct CameraController {
-    speed: f32,
-    sensitivity: f32,
-    is_forward_pressed: bool,
-    is_backward_pressed: bool,
-    is_left_pressed: bool,
-    is_right_pressed: bool,
-    is_up_pressed: bool,
-    is_down_pressed: bool,
-}
-
-impl CameraController {
-    fn new() -> Self {
-        Self {
-            speed: 0.2,
-            sensitivity: 0.004,
-            is_forward_pressed: false,
-            is_backward_pressed: false,
-            is_left_pressed: false,
-            is_right_pressed: false,
-            is_up_pressed: false,
-            is_down_pressed: false,
-        }
-    }
-
     fn process_events(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput {
@@ -199,12 +184,11 @@ impl CameraController {
             _ => false,
         }
     }
-
-    fn update_camera(&self, camera: &mut Camera) {
+    fn update_camera(&mut self) {
         use cgmath::{InnerSpace, Rad, Vector3, Zero};
 
-        let yaw = Rad(camera.yaw);
-        let pitch = Rad(camera.pitch);
+        let yaw = Rad(self.yaw);
+        let pitch = Rad(self.pitch);
 
         let forward = Vector3::new(
             yaw.0.cos() * pitch.0.cos(),
@@ -213,8 +197,8 @@ impl CameraController {
         )
         .normalize();
 
-        let right = forward.cross(camera.up).normalize();
-        let up = camera.up;
+        let right = forward.cross(self.up).normalize();
+        let up = self.up;
 
         let mut movement = Vector3::zero();
 
@@ -238,38 +222,22 @@ impl CameraController {
         }
 
         if movement.magnitude2() > 0.0 {
-            camera.eye += movement.normalize() * self.speed;
+            self.pos += movement.normalize() * self.speed;
         }
-    }
 
-    fn process_mouse_motion(&mut self, camera: &mut Camera, dx: f64, dy: f64) {
-        camera.yaw += dx as f32 * self.sensitivity;
-        camera.pitch -= dy as f32 * self.sensitivity;
+        self.update_view_proj();
+    }
+    fn process_mouse_motion(&mut self, dx: f64, dy: f64) {
+        self.yaw += dx as f32 * self.sensitivity;
+        self.pitch -= dy as f32 * self.sensitivity;
 
         const MAX_PITCH: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
         const MIN_PITCH: f32 = -MAX_PITCH;
 
-        camera.pitch = camera.pitch.clamp(MIN_PITCH, MAX_PITCH);
+        self.pitch = self.pitch.clamp(MIN_PITCH, MAX_PITCH);
     }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
-    // we cant use cgmath with bytemuck directly so we have to
-    // convert the Matrix4 to a 4x4 array
-    view_proj: [[f32; 4]; 4],
-}
-impl CameraUniform {
-    fn new() -> Self {
-        use cgmath::SquareMatrix;
-        Self {
-            view_proj: cgmath::Matrix4::identity().into(),
-        }
-    }
-
-    fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+    fn update_view_proj(&mut self) {
+        self.view_proj = self.build_view_projection_matrix().into();
     }
 }
 
@@ -287,8 +255,6 @@ struct State {
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
     camera: Camera,
-    camera_controller: CameraController,
-    camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     // challenge 1
@@ -370,25 +336,32 @@ impl State {
             ],
         });
 
+        use cgmath::SquareMatrix;
         let camera = Camera {
-            eye: (-5.0, 0.0, 0.0).into(),
+            pos: (-5.0, 0.0, 0.0).into(),
             pitch: 0.0,
             yaw: 0.0,
             up: cgmath::Vector3::unit_y(), // Set the UP direction
             aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
+            _fovy: 90.0,
             znear: 0.1,
             zfar: 100.0,
+
+            view_proj: cgmath::Matrix4::identity().into(),
+
+            speed: 0.1,
+            sensitivity: 0.005,
+            is_backward_pressed: false,
+            is_down_pressed: false,
+            is_forward_pressed: false,
+            is_left_pressed: false,
+            is_right_pressed: false,
+            is_up_pressed: false,
         };
-
-        let camera_controller = CameraController::new();
-
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera_buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
+            contents: bytemuck::cast_slice(&[camera.view_proj]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -447,8 +420,6 @@ impl State {
             diffuse_bind_group,
             diffuse_texture,
             camera,
-            camera_controller,
-            camera_uniform,
             camera_buffer,
             camera_bind_group,
             // Challenge 1
@@ -575,16 +546,15 @@ impl State {
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-        self.camera_controller.process_events(event)
+        self.camera.process_events(event)
     }
 
     pub fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.camera);
-        self.camera_uniform.update_view_proj(&self.camera);
+        self.camera.update_camera();
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
+            bytemuck::cast_slice(&[self.camera.view_proj]),
         );
     }
 
@@ -623,8 +593,6 @@ impl State {
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
-
-            //render_pass.draw(0..self.num_vertices, 0..1);
         }
 
         // Submit will accept anything that implements IntoIter

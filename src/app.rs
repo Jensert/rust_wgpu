@@ -76,8 +76,8 @@ impl ApplicationHandler for App {
             DeviceEvent::MouseMotion { delta: (dx, dy) } => {
                 if let Some(state) = self.state.as_mut() {
                     state
-                        .camera_controller
-                        .process_mouse_motion(&mut state.camera, dx, dy);
+                        .camera
+                        .process_mouse_motion(dx, dy);
                 }
             }
             _ => {}
